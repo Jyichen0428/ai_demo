@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>五子棋</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        #board {
+            margin: 20px auto;
+            border-collapse: collapse;
+        }
+        #board td {
+            width: 30px;
+            height: 30px;
+            border: 1px solid #000;
+            position: relative;
+            cursor: pointer;
+        }
+        #board td:hover {
+            background-color: #f0f0f0;
+        }
+        .piece {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 25px;
+            height: 25px;
+            border-radius: 50%;
+        }
+        .black {
+            background-color: #000;
+        }
+        .white {
+            background-color: #fff;
+            border: 1px solid #000;
+        }
+        #message {
+            margin-top: 20px;
+            font-size: 18px;
+        }
+        button {
+            margin-top: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h1>五子棋</h1>
+    <table id="board"></table>
+    <div id="message"></div>
+    <button onclick="resetGame()">重置游戏</button>
+
+    <script>
+        const BOARD_SIZE = 15;
+        let board = Array(BOARD_SIZE).fill().map(() => Array(BOARD_SIZE).fill(0)); // 0: empty, 1: black, 2: white
+        let currentPlayer = 1; // 1: black, 2: white
+        let gameOver = false;
+
+        function createBoard() {
+            const table = document.getElementById('board');
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                const row = document.createElement('tr');
+                for (let j = 0; j < BOARD_SIZE; j++) {
+                    const cell = document.createElement('td');
+                    cell.dataset.row = i;
+                    cell.dataset.col = j;
+                    cell.addEventListener('click', handleClick);
+                    row.appendChild(cell);
+                }
+                table.appendChild(row);
+            }
+        }
+
+        function handleClick(event) {
+            if (gameOver) return;
+            const row = parseInt(event.target.dataset.row);
+            const col = parseInt(event.target.dataset.col);
+            if (board[row][col] !== 0) return; // already occupied
+
+            board[row][col] = currentPlayer;
+            const piece = document.createElement('div');
+            piece.className = currentPlayer === 1 ? 'piece black' : 'piece white';
+            event.target.appendChild(piece);
+
+            if (checkWin(row, col)) {
+                gameOver = true;
+                document.getElementById('message').textContent = (currentPlayer === 1 ? '黑子' : '白子') + '获胜！';
+            } else {
+                currentPlayer = currentPlayer === 1 ? 2 : 1;
+                document.getElementById('message').textContent = (currentPlayer === 1 ? '黑子' : '白子') + '的回合';
+            }
+        }
+
+        function checkWin(row, col) {
+            const directions = [
+                [0, 1], // horizontal
+                [1, 0], // vertical
+                [1, 1], // diagonal \
+                [1, -1] // diagonal /
+            ];
+            for (let [dr, dc] of directions) {
+                let count = 1;
+                // check positive direction
+                let r = row + dr, c = col + dc;
+                while (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c] === currentPlayer) {
+                    count++;
+                    r += dr;
+                    c += dc;
+                }
+                // check negative direction
+                r = row - dr, c = col - dc;
+                while (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c] === currentPlayer) {
+                    count++;
+                    r -= dr;
+                    c -= dc;
+                }
+                if (count >= 5) return true;
+            }
+            return false;
+        }
+
+        function resetGame() {
+            board = Array(BOARD_SIZE).fill().map(() => Array(BOARD_SIZE).fill(0));
+            currentPlayer = 1;
+            gameOver = false;
+            document.getElementById('board').innerHTML = '';
+            document.getElementById('message').textContent = '黑子的回合';
+            createBoard();
+        }
+
+        // Initialize
+        resetGame();
+    </script>
+</body>
+</html>
