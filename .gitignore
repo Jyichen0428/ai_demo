@@ -1,2 +1,3 @@
 # Ignore wallpaper downloads directory
 /wallpapers/
+/node_modules/
