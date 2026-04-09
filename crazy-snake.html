@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>疯狂贪吃蛇 | 完美修复版</title>
+    <style>
+        * {
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: radial-gradient(circle at 20% 30%, #0a0f1e, #03060c);
+            font-family: 'Segoe UI', 'Press Start 2P', 'Courier New', monospace;
+            overflow: hidden;
+        }
+
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            padding: 20px;
+            border-radius: 32px;
+            background: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(4px);
+            box-shadow: 0 20px 35px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+        }
+
+        .info-panel {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            width: 100%;
+            gap: 40px;
+            padding: 8px 20px;
+            background: #000000aa;
+            border-radius: 60px;
+            backdrop-filter: blur(8px);
+            border: 1px solid #2eff8e44;
+        }
+
+        .score-box, .best-box {
+            font-size: 28px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            text-shadow: 0 0 8px #0f0;
+        }
+
+        .score-box span, .best-box span {
+            font-size: 18px;
+            color: #bbffaa;
+            margin-right: 8px;
+        }
+
+        .score-box {
+            color: #aaffdd;
+        }
+
+        .best-box {
+            color: #ffd966;
+        }
+
+        canvas {
+            border-radius: 24px;
+            box-shadow: 0 0 0 3px #2eff8e, 0 10px 30px rgba(0,0,0,0.6);
+            background-color: #0b1a1a;
+            cursor: pointer;
+        }
+
+        .controls {
+            display: flex;
+            gap: 18px;
+            margin-top: 8px;
+        }
+
+        button {
+            background: #1f2a2f;
+            border: none;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            padding: 8px 24px;
+            border-radius: 48px;
+            font-family: monospace;
+            cursor: pointer;
+            transition: all 0.1s ease;
+            box-shadow: 0 4px 0 #0a0e12;
+            letter-spacing: 1px;
+        }
+
+        button:active {
+            transform: translateY(2px);
+            box-shadow: 0 1px 0 #0a0e12;
+        }
+
+        .restart-btn {
+            background: #2e7d5e;
+            color: #eafff0;
+        }
+
+        .status {
+            font-size: 14px;
+            background: #000000aa;
+            padding: 6px 16px;
+            border-radius: 40px;
+            font-weight: bold;
+            color: #ceffb0;
+        }
+    </style>
+</head>
+<body>
+<div>
+    <div class="game-container">
+        <div class="info-panel">
+            <div class="score-box"><span>🍎</span> <span id="scoreValue">0</span></div>
+            <div class="best-box"><span>🏆 最高分</span> <span id="bestScore">0</span></div>
+        </div>
+        <canvas id="gameCanvas" width="500" height="500"></canvas>
+        <div class="controls">
+            <button id="restartButton" class="restart-btn">🐍 新的一局</button>
+        </div>
+        <div class="status">⬆️ ⬇️ ⬅️ ➡️  |  每吃食物加速 + 障碍物递增</div>
+    </div>
+</div>
+
+<script>
+    (function(){
+        // ---------- 配置 ----------
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const gridSize = 25;
+        const tileCount = 20;
+        
+        let snake = [];
+        let food = { x: 12, y: 12 };
+        let obstacles = [];
+        let dx = 1, dy = 0;
+        let score = 0;
+        let bestScore = 0;
+        let speed = 170;
+        let gameRunning = true;
+        let gameLoopTimeout = null;
+        let isRestarting = false;  // 防止重复重启
+        
+        // 读取最高分
+        try {
+            const saved = localStorage.getItem('crazySnakeBest');
+            if(saved && !isNaN(parseInt(saved))) bestScore = parseInt(saved);
+            document.getElementById('bestScore').innerText = bestScore;
+        } catch(e) {}
+        
+        function updateBestScoreUI(){
+            document.getElementById('bestScore').innerText = bestScore;
+            if(score > bestScore){
+                bestScore = score;
+                document.getElementById('bestScore').innerText = bestScore;
+                try { localStorage.setItem('crazySnakeBest', bestScore); } catch(e) {}
+            }
+        }
+        
+        function isOnSnake(x, y, ignoreHeadIndex = -1){
+            for(let i=0; i<snake.length; i++){
+                if(ignoreHeadIndex === i) continue;
+                if(snake[i].x === x && snake[i].y === y) return true;
+            }
+            return false;
+        }
+        
+        function isOnObstacle(x, y){
+            return obstacles.some(obs => obs.x === x && obs.y === y);
+        }
+        
+        // 检查某个格子是否可走（不被蛇身和障碍物占据）
+        function isFreeCell(x, y, includeHeadAsOccupied = true){
+            if(x < 0 || x >= tileCount || y < 0 || y >= tileCount) return false;
+            if(isOnObstacle(x, y)) return false;
+            if(includeHeadAsOccupied){
+                if(isOnSnake(x, y)) return false;
+            }else{
+                // 排除蛇头位置
+                for(let i=1; i<snake.length; i++){
+                    if(snake[i].x === x && snake[i].y === y) return false;
+                }
+            }
+            return true;
+        }
+        
+        // 生成有效食物（改进版，确保一定能找到位置）
+        function generateValidFood(){
+            // 先快速随机尝试
+            for(let attempt=0; attempt<500; attempt++){
+                const randX = Math.floor(Math.random() * tileCount);
+                const randY = Math.floor(Math.random() * tileCount);
+                if(isFreeCell(randX, randY, true)){
+                    food = { x: randX, y: randY };
+                    return true;
+                }
+            }
+            // 如果随机失败，遍历所有格子
+            for(let i=0; i<tileCount; i++){
+                for(let j=0; j<tileCount; j++){
+                    if(isFreeCell(i, j, true)){
+                        food = { x: i, y: j };
+                        return true;
+                    }
+                }
+            }
+            // 真的满了，胜利
+            return false;
+        }
+        
+        // 胜利处理
+        function gameWin(){
+            if(!gameRunning) return;
+            gameRunning = false;
+            if(gameLoopTimeout) clearTimeout(gameLoopTimeout);
+            alert(`🎉 奇迹通关！🎉\n你吃满了所有格子！得分: ${score} 🏆`);
+            initGame();
+        }
+        
+        // 检查蛇头周围是否有至少一个自由格子（防止开局被困）
+        function hasEscapeRoute(){
+            if(snake.length === 0) return true;
+            const head = snake[0];
+            const neighbors = [
+                {x: head.x+1, y: head.y}, {x: head.x-1, y: head.y},
+                {x: head.x, y: head.y+1}, {x: head.x, y: head.y-1}
+            ];
+            for(let n of neighbors){
+                if(n.x >=0 && n.x < tileCount && n.y >=0 && n.y < tileCount){
+                    if(!isOnObstacle(n.x, n.y) && !isOnSnake(n.x, n.y, 0)){
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        
+        // 生成障碍物（改进版，确保不会堵死蛇）
+        function regenerateObstaclesByScore(){
+            let targetObstacleCount = Math.min(22, 6 + Math.floor(score / 8));
+            
+            if(obstacles.length < targetObstacleCount){
+                let need = targetObstacleCount - obstacles.length;
+                let attempts = 0;
+                while(need > 0 && attempts < 300){
+                    const randX = Math.floor(Math.random() * tileCount);
+                    const randY = Math.floor(Math.random() * tileCount);
+                    // 不能生成在蛇身上，不能生成在食物上，不能重复
+                    if(isFreeCell(randX, randY, true) && !(food.x === randX && food.y === randY)){
+                        obstacles.push({x: randX, y: randY});
+                        need--;
+                    }
+                    attempts++;
+                }
+            }else if(obstacles.length > targetObstacleCount){
+                obstacles = obstacles.slice(0, targetObstacleCount);
+            }
+            
+            // 关键修复：如果生成障碍物后蛇被堵死，回滚障碍物
+            if(!hasEscapeRoute()){
+                // 移除最后一个添加的障碍物直到蛇有出路
+                while(obstacles.length > 0 && !hasEscapeRoute()){
+                    obstacles.pop();
+                }
+            }
+        }
+        
+        // 碰撞检测（在移动前预测）
+        function wouldCollide(headX, headY){
+            if(headX < 0 || headX >= tileCount || headY < 0 || headY >= tileCount){
+                return true;
+            }
+            if(isOnObstacle(headX, headY)){
+                return true;
+            }
+            // 自身碰撞（注意：如果吃到食物，尾部不会缩短，需要特殊处理）
+            for(let i=0; i<snake.length; i++){
+                if(snake[i].x === headX && snake[i].y === headY){
+                    return true;
+                }
+            }
+            return false;
+        }
+        
+        // 核心移动逻辑（修复版）
+        function moveSnake(){
+            if(!gameRunning) return false;
+            
+            const head = { x: snake[0].x + dx, y: snake[0].y + dy };
+            const willEat = (head.x === food.x && head.y === food.y);
+            
+            // 关键修复：先预测碰撞（不考虑吃食物时的尾部缩短）
+            let collision = false;
+            if(willEat){
+                // 吃食物时，蛇会变长，碰撞检测需要检查头部和现有身体（不包括尾部，因为尾部还在）
+                if(head.x < 0 || head.x >= tileCount || head.y < 0 || head.y >= tileCount){
+                    collision = true;
+                }else if(isOnObstacle(head.x, head.y)){
+                    collision = true;
+                }else{
+                    // 检查是否撞到自己（包括头部碰到身体）
+                    for(let i=0; i<snake.length; i++){
+                        if(snake[i].x === head.x && snake[i].y === head.y){
+                            collision = true;
+                            break;
+                        }
+                    }
+                }
+            }else{
+                // 不吃食物，蛇会缩短尾部，碰撞检测需要忽略尾部
+                if(head.x < 0 || head.x >= tileCount || head.y < 0 || head.y >= tileCount){
+                    collision = true;
+                }else if(isOnObstacle(head.x, head.y)){
+                    collision = true;
+                }else{
+                    // 检查是否撞到自己（排除尾部最后一个格子，因为它即将被移除）
+                    for(let i=0; i<snake.length-1; i++){
+                        if(snake[i].x === head.x && snake[i].y === head.y){
+                            collision = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if(collision){
+                gameRunning = false;
+                if(gameLoopTimeout) clearTimeout(gameLoopTimeout);
+                alert(`💀 游戏结束 💀\n你的得分: ${score}\n最高分: ${bestScore}`);
+                initGame();
+                return false;
+            }
+            
+            // 执行移动
+            snake.unshift(head);
+            if(!willEat){
+                snake.pop();
+            }else{
+                // 吃到食物
+                score++;
+                document.getElementById('scoreValue').innerText = score;
+                updateBestScoreUI();
+                
+                // 加速
+                speed = Math.max(62, speed - 6);
+                
+                // 生成新食物
+                const successFood = generateValidFood();
+                if(!successFood){
+                    gameWin();
+                    return false;
+                }
+                
+                // 增加障碍物
+                regenerateObstaclesByScore();
+                
+                // 确保食物没有被新障碍物覆盖
+                if(isOnObstacle(food.x, food.y)){
+                    generateValidFood();
+                }
+            }
+            
+            return true;
+        }
+        
+        // 绘图函数（优化版）
+        function drawGame(){
+            ctx.fillStyle = '#0c1a1f';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // 网格
+            ctx.strokeStyle = '#1e3b2f';
+            ctx.lineWidth = 0.6;
+            for(let i=0; i<=tileCount; i++){
+                ctx.beginPath();
+                ctx.moveTo(i*gridSize, 0);
+                ctx.lineTo(i*gridSize, canvas.height);
+                ctx.stroke();
+                ctx.moveTo(0, i*gridSize);
+                ctx.lineTo(canvas.width, i*gridSize);
+                ctx.stroke();
+            }
+            
+            // 障碍物
+            obstacles.forEach(obs => {
+                const x = obs.x * gridSize;
+                const y = obs.y * gridSize;
+                ctx.fillStyle = '#5a4a3a';
+                ctx.fillRect(x+1, y+1, gridSize-2, gridSize-2);
+                ctx.fillStyle = '#7e5e48';
+                ctx.fillRect(x+2, y+2, gridSize-5, gridSize-5);
+                ctx.fillStyle = '#b87c4f';
+                ctx.fillRect(x+3, y+3, gridSize-8, gridSize-8);
+                ctx.fillStyle = '#ccaa77';
+                ctx.fillRect(x+8, y+8, 3, 3);
+                ctx.fillRect(x+14, y+14, 3, 3);
+            });
+            
+            // 食物
+            const fx = food.x * gridSize;
+            const fy = food.y * gridSize;
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = '#ff3300';
+            ctx.fillStyle = '#ff3a2f';
+            ctx.beginPath();
+            ctx.arc(fx+gridSize/2, fy+gridSize/2, gridSize/2-3, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = '#ffd966';
+            ctx.beginPath();
+            ctx.arc(fx+gridSize/2-2, fy+gridSize/2-2, 3, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = '#7cb518';
+            ctx.fillRect(fx+gridSize-8, fy+2, 4, 7);
+            ctx.shadowBlur = 0;
+            
+            // 蛇
+            for(let i=0; i<snake.length; i++){
+                const seg = snake[i];
+                const segX = seg.x * gridSize;
+                const segY = seg.y * gridSize;
+                const grad = ctx.createLinearGradient(segX, segY, segX+gridSize, segY+gridSize);
+                if(i===0){
+                    grad.addColorStop(0, '#70ff70');
+                    grad.addColorStop(1, '#2ecc2e');
+                }else{
+                    grad.addColorStop(0, '#3ba53b');
+                    grad.addColorStop(1, '#1f8a1f');
+                }
+                ctx.fillStyle = grad;
+                ctx.shadowBlur = 3;
+                ctx.shadowColor = '#4eff6e';
+                ctx.fillRect(segX+1, segY+1, gridSize-2, gridSize-2);
+                if(i===0){
+                    ctx.fillStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.arc(segX+gridSize-7, segY+7, 3, 0, Math.PI*2);
+                    ctx.arc(segX+7, segY+7, 3, 0, Math.PI*2);
+                    ctx.fill();
+                    ctx.fillStyle = '#000000';
+                    ctx.beginPath();
+                    ctx.arc(segX+gridSize-6, segY+6, 1.5, 0, Math.PI*2);
+                    ctx.arc(segX+8, segY+6, 1.5, 0, Math.PI*2);
+                    ctx.fill();
+                }
+            }
+            ctx.shadowBlur = 0;
+            
+            ctx.font = "bold 14px monospace";
+            ctx.fillStyle = "#caffb0";
+            ctx.fillText(`⚡ ${Math.min(99, Math.floor(300/speed)*2)}%`, 12, 30);
+            ctx.fillStyle = "#ffbc6e";
+            ctx.fillText(`🧱 ${obstacles.length}`, canvas.width-55, 30);
+        }
+        
+        // 游戏循环
+        function gameLoop(){
+            if(!gameRunning) return;
+            moveSnake();
+            if(!gameRunning) return;
+            drawGame();
+            if(gameLoopTimeout) clearTimeout(gameLoopTimeout);
+            gameLoopTimeout = setTimeout(() => {
+                gameLoop();
+            }, speed);
+        }
+        
+        // 键盘控制
+        function handleKey(e){
+            if(!gameRunning) return;
+            const key = e.key;
+            if(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)){
+                e.preventDefault();
+            }
+            if(key === 'ArrowUp' && dy !== 1){
+                dx = 0; dy = -1;
+            }else if(key === 'ArrowDown' && dy !== -1){
+                dx = 0; dy = 1;
+            }else if(key === 'ArrowLeft' && dx !== 1){
+                dx = -1; dy = 0;
+            }else if(key === 'ArrowRight' && dx !== -1){
+                dx = 1; dy = 0;
+            }
+        }
+        
+        // 触摸滑动
+        let touchStart = null;
+        function handleTouchStart(e){
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            touchStart = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+        }
+        function handleTouchEnd(e){
+            if(!touchStart || !gameRunning) return;
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const endX = e.changedTouches[0].clientX - rect.left;
+            const endY = e.changedTouches[0].clientY - rect.top;
+            const dxMove = endX - touchStart.x;
+            const dyMove = endY - touchStart.y;
+            if(Math.abs(dxMove) < 15 && Math.abs(dyMove) < 15) return;
+            if(Math.abs(dxMove) > Math.abs(dyMove)){
+                if(dxMove > 0 && dx !== -1) { dx = 1; dy = 0; }
+                else if(dxMove < 0 && dx !== 1) { dx = -1; dy = 0; }
+            }else{
+                if(dyMove > 0 && dy !== -1) { dx = 0; dy = 1; }
+                else if(dyMove < 0 && dy !== 1) { dx = 0; dy = -1; }
+            }
+            touchStart = null;
+        }
+        
+        // 初始化游戏（修复版）
+        function initGame(){
+            if(isRestarting) return;
+            isRestarting = true;
+            
+            if(gameLoopTimeout) clearTimeout(gameLoopTimeout);
+            
+            snake = [{x: 10, y: 10}, {x: 9, y: 10}, {x: 8, y: 10}];
+            dx = 1; dy = 0;
+            score = 0;
+            speed = 170;
+            gameRunning = true;
+            document.getElementById('scoreValue').innerText = score;
+            
+            // 重置障碍物
+            obstacles = [];
+            const initialObstacleCount = 6;
+            let added = 0;
+            while(added < initialObstacleCount){
+                const randX = Math.floor(Math.random() * tileCount);
+                const randY = Math.floor(Math.random() * tileCount);
+                let snakeOccupied = snake.some(seg => seg.x === randX && seg.y === randY);
+                if(!snakeOccupied && !obstacles.some(o=>o.x===randX && o.y===randY)){
+                    obstacles.push({x: randX, y: randY});
+                    added++;
+                }
+            }
+            
+            // 确保蛇有出路
+            if(!hasEscapeRoute()){
+                // 如果被困，减少障碍物
+                while(obstacles.length > 0 && !hasEscapeRoute()){
+                    obstacles.pop();
+                }
+            }
+            
+            // 生成食物
+            generateValidFood();
+            
+            drawGame();
+            gameLoop();
+            
+            setTimeout(() => { isRestarting = false; }, 100);
+        }
+        
+        canvas.addEventListener('touchstart', handleTouchStart, {passive: false});
+        canvas.addEventListener('touchend', handleTouchEnd);
+        canvas.addEventListener('touchcancel', (e)=>{ touchStart=null; });
+        window.addEventListener('keydown', handleKey);
+        
+        const restartBtn = document.getElementById('restartButton');
+        restartBtn.addEventListener('click', ()=>{
+            if(gameLoopTimeout) clearTimeout(gameLoopTimeout);
+            initGame();
+        });
+        
+        initGame();
+    })();
+</script>
+</body>
+</html>
